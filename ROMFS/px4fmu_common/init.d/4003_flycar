@@ -1,0 +1,14 @@
+#!nsh
+#
+# @name Flycar Test Config
+#
+# @type custom 
+# 
+# @maintainer Nicholas Sadjoli<nick.sadjoli@gmail.com>
+#
+
+sh /etc/init.d/rc.flycar_defaults
+
+set MIXER flycar
+
+set PWM_OUT 12345678
