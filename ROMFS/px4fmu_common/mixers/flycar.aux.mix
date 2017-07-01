@@ -1,0 +1,21 @@
+# Manual pass through mixer for servo outputs 1-4
+
+# AUX1 channel (select RC channel with RC_MAP_AUX1 param) // modified to be mapped to throttle input
+M: 1
+O:      10000  10000      0 -10000  10000
+S: 0 3  10000  10000      0 -10000  10000
+
+# AUX2 channel (select RC channel with RC_MAP_AUX2 param) // modified to be mapped to roll input
+M: 1
+O:      10000  10000      0 -10000  10000
+S: 0 0  10000  10000      0 -10000  10000
+
+# AUX3 channel (select RC channel with RC_MAP_AUX3 param) // modified to be mapped to pitch input
+M: 1
+O:      10000  10000      0 -10000  10000
+S: 0 1  10000  10000      0 -10000  10000
+
+# FLAPS channel (select RC channel with RC_MAP_FLAPS param)
+M: 1
+O:      10000  10000      0 -10000  10000
+S: 3 4  10000  10000      0 -10000  10000

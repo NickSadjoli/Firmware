@@ -21,13 +21,13 @@ set PWM_DISARMED p:PWM_DISARMED
 set PWM_MIN p:PWM_MIN
 set PWM_MAX p:PWM_MAX
 
-# This is the gimbal pass mixer
-set MIXER_AUX pass
-set PWM_AUX_RATE 50
+# This is the modified gimbal mixer, to use modified flycar aux mixer instead. Also modified aux to behave similarly to the main outs
+set MIXER_AUX flycar
+set PWM_AUX_RATE 400
 set PWM_AUX_OUT 1234
-set PWM_AUX_DISARMED 1500
-set PWM_AUX_MIN 1000
-set PWM_AUX_MAX 2000
+set PWM_AUX_DISARMED 900
+set PWM_AUX_MIN 1075
+set PWM_AUX_MAX 1950
 
 if param compare PWM_DISARMED 0
 then

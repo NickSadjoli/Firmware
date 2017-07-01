@@ -12,3 +12,4 @@ sh /etc/init.d/rc.flycar_defaults
 set MIXER flycar
 
 set PWM_OUT 12345678
+set PWM_RATE 400

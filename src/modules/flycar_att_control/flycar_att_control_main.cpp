@@ -71,6 +71,7 @@
 #include <uORB/topics/vehicle_attitude_setpoint.h>
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/actuator_controls.h>
+#include <uORB/topics/actuator_direct.h>
 #include <uORB/topics/vehicle_rates_setpoint.h>
 #include <uORB/topics/fw_virtual_rates_setpoint.h>
 #include <uORB/topics/mc_virtual_rates_setpoint.h>
@@ -143,14 +144,17 @@ private:
 	int		_armed_sub;				/**< arming status subscription */
 	int		_vehicle_status_sub;	/**< vehicle status subscription */
 	int 	_motor_limits_sub;		/**< motor limits subscription */
+	int 	_actutator_direct_sub;	/**< subscription for actuator_direct */
 
 	orb_advert_t	_v_rates_sp_pub;		/**< rate setpoint publication */
 	orb_advert_t	_actuators_0_pub;		/**< attitude actuator controls publication */
 	orb_advert_t	_controller_status_pub;	/**< controller status publication */
 	orb_advert_t	_v_control_mode_pub;
+	orb_advert_t	_actuator_direct_pub;
 
 	orb_id_t _rates_sp_id;	/**< pointer to correct rates setpoint uORB metadata structure */
 	orb_id_t _actuators_id;	/**< pointer to correct actuator controls0 uORB metadata structure */
+	orb_id_t _actuator_direct_id;
 
 	bool		_actuators_0_circuit_breaker_enabled;	/**< circuit breaker to suppress output */
 
@@ -165,6 +169,7 @@ private:
 	struct vehicle_status_s				_vehicle_status;	/**< vehicle status */
 	struct multirotor_motor_limits_s	_motor_limits;		/**< motor limits */
 	struct mc_att_ctrl_status_s 		_controller_status; /**< controller status */
+	struct actuator_direct_s 			_actuator_direct;
 
 	perf_counter_t	_loop_perf;			/**< loop performance counter */
 	perf_counter_t	_controller_latency_perf;
@@ -287,7 +292,7 @@ private:
 	* Controller for vehicle at car mode.
 	*/
 	void 		car_control(const struct vehicle_attitude_setpoint_s *att_sp, const struct vehicle_attitude_s *att,
-		      struct actuator_controls_s *_act); 
+		      struct actuator_direct_s *_act); 
 
 	/**
 	 * Attitude rates controller.
@@ -342,6 +347,7 @@ FlycarAttitudeControl::FlycarAttitudeControl() :
 	_v_control_mode_pub(nullptr),
 	_rates_sp_id(0),
 	_actuators_id(0),
+	_actuator_direct_id(0),
 
 	_actuators_0_circuit_breaker_enabled(false),
 
@@ -362,6 +368,7 @@ FlycarAttitudeControl::FlycarAttitudeControl() :
 	memset(&_vehicle_status, 0, sizeof(_vehicle_status));
 	memset(&_motor_limits, 0, sizeof(_motor_limits));
 	memset(&_controller_status, 0, sizeof(_controller_status));
+	memset(&_actuator_direct, 0, sizeof(_actuator_direct));
 	_vehicle_status.is_rotary_wing = true;
 
 	_params.att_p.zero();
@@ -829,12 +836,12 @@ FlycarAttitudeControl::control_attitude_rates(float dt)
 			}
 		}
 	}
-}
+}	
 
 
 void
 FlycarAttitudeControl::car_control(const struct vehicle_attitude_setpoint_s *att_sp, const struct vehicle_attitude_s *att,
-		      struct actuator_controls_s *_act)
+			struct actuator_direct_s *_act)
 {
 		/*
 	 * The PX4 architecture provides a mixer outside of the controller.
@@ -857,19 +864,25 @@ FlycarAttitudeControl::car_control(const struct vehicle_attitude_setpoint_s *att
 	 */
 
 	/* set r/p zero */
-	_act->control[0] = 0.0f;
-	_act->control[1] = 0.0f;
+	_act->values[0] = 0.0f;
+	_act->values[1] = 0.5f;
 
 	/*
 	 * Calculate yaw error and apply P gain
 	 */
-	float yaw_err = matrix::Eulerf(matrix::Quatf(att->q)).psi() - matrix::Eulerf(matrix::Quatf(att_sp->q_d)).psi();
-	_act->control[2] = yaw_err * _params_handles.yaw_p;
+	//float yaw_err = matrix::Eulerf(matrix::Quatf(att->q)).psi() - matrix::Eulerf(matrix::Quatf(att_sp->q_d)).psi();
+	/*
+	_act->values[2] = yaw_err * _params_handles.yaw_p;
 
-	/* copy throttle */
-	_act->control[3] = att_sp->thrust;
 
-	_act->timestamp = hrt_absolute_time();
+	_act->values[3] = att_sp->thrust;
+	*/
+
+	_act->values[2] = 0.0f;
+	_act->values[3] = 0.0f;
+	_act->values[4] = att_sp->q_d[2];
+	_act->values[5] = att_sp->thrust;
+
 }
 
 
@@ -898,6 +911,7 @@ FlycarAttitudeControl::task_main()
 	_motor_limits_sub = orb_subscribe(ORB_ID(multirotor_motor_limits));
 
 	_v_control_mode_pub = orb_advertise(ORB_ID(vehicle_control_mode),&_v_control_mode);
+	_actuator_direct_pub = orb_advertise(ORB_ID(actuator_direct), &_actuator_direct);
 
 	/* initialize parameters cache */
 	parameters_update();
@@ -957,8 +971,9 @@ FlycarAttitudeControl::task_main()
 			 * or roll (yaw can rotate 360 in normal att control).  If both are true don't
 			 * even bother running the attitude controllers */
 			if (_v_control_mode.flag_control_rattitude_enabled) {
-				if (fabsf(_manual_control_sp.z) < _params.throttle_thres ) { /*manual_control_sp is the setpoint which should indicate currnent 
-																				throttle invoked by the pilot*/ 
+				/*
+				if (fabsf(_manual_control_sp.z) < _params.throttle_thres ) { //manual_control_sp is the setpoint which should indicate currnent 
+																			 //throttle invoked by the pilot 
 					_v_control_mode.flag_control_attitude_enabled = false;
 					_v_control_mode.flag_control_manual_enabled = true;
 
@@ -968,7 +983,13 @@ FlycarAttitudeControl::task_main()
 					_v_control_mode.flag_control_attitude_enabled = true;
 				}
 				_v_control_mode_pub = orb_advertise(ORB_ID(vehicle_control_mode),&_v_control_mode);
-				orb_publish(ORB_ID(vehicle_control_mode), _v_control_mode_pub, &_v_control_mode);	
+				orb_publish(ORB_ID(vehicle_control_mode), _v_control_mode_pub, &_v_control_mode);
+				*/
+
+				if (fabsf(_manual_control_sp.y) > _params.rattitude_thres ||
+				    fabsf(_manual_control_sp.x) > _params.rattitude_thres) {
+					_v_control_mode.flag_control_attitude_enabled = false;
+				}	
 			}
 
 			if (_v_control_mode.flag_control_attitude_enabled) {
@@ -993,6 +1014,8 @@ FlycarAttitudeControl::task_main()
 				}
 
 				/* publish attitude rates setpoint */
+
+				//_v_rates_sp.roll = _rates_sp(0);
 				_v_rates_sp.roll = _rates_sp(0);
 				_v_rates_sp.pitch = _rates_sp(1);
 				_v_rates_sp.yaw = _rates_sp(2);
@@ -1006,17 +1029,62 @@ FlycarAttitudeControl::task_main()
 					_v_rates_sp_pub = orb_advertise(_rates_sp_id, &_v_rates_sp);
 				}
 
+
+				/*
+				if (_thrust_sp < _params.throttle_thres){
+
+					_v_rates_sp.roll = _rates_sp(0);
+					_v_rates_sp.pitch = _rates_sp(1);
+					_v_rates_sp.yaw = _rates_sp(2);
+					_v_rates_sp.thrust = _thrust_sp;
+					_v_rates_sp.timestamp = hrt_absolute_time();
+					car_control(&_v_att_sp, &_v_att, &_actuator_direct);
+
+					if (_v_rates_sp_pub != nullptr) {
+					orb_publish(_rates_sp_id, _v_rates_sp_pub, &_v_rates_sp);
+
+					} else if (_rates_sp_id) {
+						_v_rates_sp_pub = orb_advertise(_rates_sp_id, &_v_rates_sp);
+					}
+
+					if (_actuator_direct_pub != nullptr){
+						orb_publish(ORB_ID(actuator_direct), _actuator_direct_pub, &_actuator_direct);
+					}
+				}
+
+				else{
+
+					_v_rates_sp.roll = _rates_sp(0);
+					_v_rates_sp.pitch = _rates_sp(1);
+					_v_rates_sp.yaw = _rates_sp(2);
+					_v_rates_sp.thrust = _thrust_sp;
+					_v_rates_sp.timestamp = hrt_absolute_time();
+
+					if (_v_rates_sp_pub != nullptr) {
+						orb_publish(_rates_sp_id, _v_rates_sp_pub, &_v_rates_sp);
+
+					} else if (_rates_sp_id) {
+						_v_rates_sp_pub = orb_advertise(_rates_sp_id, &_v_rates_sp);
+					}
+
+				}
+				*/
+
+				
 				//}
 
 			} else {
 				/* attitude controller disabled, poll rates setpoint topic */
 				if (_v_control_mode.flag_control_manual_enabled) {
 					/* manual rates control - ACRO mode */
+					
 					_rates_sp = math::Vector<3>(_manual_control_sp.y, -_manual_control_sp.x,
 								    _manual_control_sp.r).emult(_params.acro_rate_max);
 					_thrust_sp = math::min(_manual_control_sp.z, MANUAL_THROTTLE_MAX_MULTICOPTER);
+					
 
 					/* publish attitude rates setpoint */
+					
 					_v_rates_sp.roll = 0;
 					_v_rates_sp.pitch = 0;
 					_v_rates_sp.yaw = _rates_sp(2);
@@ -1030,6 +1098,7 @@ FlycarAttitudeControl::task_main()
 						_v_rates_sp_pub = orb_advertise(_rates_sp_id, &_v_rates_sp);
 					}
 
+
 				} else {
 					/* attitude controller disabled, poll rates setpoint topic */
 					vehicle_rates_setpoint_poll();
@@ -1041,13 +1110,26 @@ FlycarAttitudeControl::task_main()
 			}
 
 			if (_v_control_mode.flag_control_rates_enabled) {
-				car_control(&_v_att_sp, &_v_att, &_actuators);
+				//car_control(&_v_att_sp, &_v_att, &_actuator_direct);
 
 				/* publish actuator controls */
-				_actuators.control[0] = (PX4_ISFINITE(_att_control(0))) ? _att_control(0) : 0.0f;
+				//_actuators.control[0] = (PX4_ISFINITE(_att_control(0))) ? _att_control(0) : 0.0f;
+				_actuators.control[0] = 0.0f;
 				_actuators.control[1] = (PX4_ISFINITE(_att_control(1))) ? _att_control(1) : 0.0f;
 				_actuators.control[2] = (PX4_ISFINITE(_att_control(2))) ? _att_control(2) : 0.0f;
 				_actuators.control[3] = (PX4_ISFINITE(_thrust_sp)) ? _thrust_sp : 0.0f;
+
+
+				//if (_thrust_sp < _params.throttle_thres){
+				if (fabsf(_manual_control_sp.z) < _params.throttle_thres){
+					_actuators.control[4] = _actuators.control[0];
+					_actuators.control[7] = _actuators.control[1];
+				}
+				else{
+					_actuators.control[4] = 0.0f;
+					_actuators.control[7] = 0.0f;
+				}
+
 				_actuators.timestamp = hrt_absolute_time();
 				_actuators.timestamp_sample = _ctrl_state.timestamp;
 
